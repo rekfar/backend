@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Settings shared by every project in this repository. A project that needs something
+  different overrides it locally rather than this file loosening for everyone.
+-->
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Strict from the start, matching the database repository's TreatTSqlWarningsAsErrors.
+         A warning that is genuinely benign goes in NoWarn below with a comment explaining
+         why — do not turn this flag off. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn></NoWarn>
+
+    <!-- Reproducible builds: same source in, same assembly out. -->
+    <Deterministic>true</Deterministic>
+
+    <!-- Explicit because a container image is a standing temptation to set it true, and
+         this application cannot afford it: Norwegian text sorting, nb-NO formatting and
+         the accent-insensitive name matching the catalogue depends on all need ICU.
+         Coordinate parsing is pinned to InvariantCulture in code instead — the decimal
+         separator in nb-NO is a comma, which is also the bbox separator. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>

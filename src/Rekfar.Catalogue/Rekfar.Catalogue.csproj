@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Catalogue module: peaks, and later routes and cabins, sourced from Kartverket.
+  Owns its own entities, EF Core configuration and queries, and exposes its endpoints to
+  the host. It reads [ref] tables and writes none of them.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+</Project>

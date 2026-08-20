@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Central package management: projects reference packages without a version, and every
+  version in the repository is decided here. One place to read what we depend on, and no
+  way for two projects to drift onto different versions of the same package.
+
+  Versions are pinned exactly. Floating ranges would make a build non-reproducible and let
+  an upstream release break main — the same reasoning the database repository applies to
+  its SqlPackage and Microsoft.Build.Sql versions.
+-->
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinning>true</CentralPackageTransitivePinning>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Packages arrive with the API host and the Catalogue module. -->
+  </ItemGroup>
+
+</Project>
