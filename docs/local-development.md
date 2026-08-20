@@ -96,6 +96,9 @@ Server with Testcontainers and publishes the dacpac into it, so it needs a conta
 and a built dacpac — from a sibling checkout of the database repository, or pointed at with
 `REKFAR_DACPAC`. Expect the first run to spend around half a minute starting SQL Server.
 
+CI does the same thing without a sibling checkout: it clones the database repository at
+`main`, builds the dacpac and points `REKFAR_DACPAC` at it — see the README.
+
 ## A trap worth knowing: hidden files
 
 **On macOS, everything under a `.claude/worktrees/` checkout carries the `UF_HIDDEN` flag.**

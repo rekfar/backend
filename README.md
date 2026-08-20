@@ -125,6 +125,33 @@ endpoints require authentication; the catalogue may allow read-only anonymous ac
 - **Tests where correctness matters:** trip status transitions, ascent and stat
   computation, GPX parsing, spatial matching.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request, as two
+jobs that fail for different reasons on purpose:
+
+- **Build & unit tests** — restore, build (`TreatWarningsAsErrors` makes this the warning
+  gate as well), `dotnet format --verify-no-changes` against the `.editorconfig`, and the
+  pure tests. No container, no database.
+- **Integration tests** — clones the [database repository](https://github.com/rekfar/database)
+  at `main`, builds its `dacpac`, and runs the tests against it. They start their own SQL
+  Server with Testcontainers and publish that schema into it.
+
+The schema is built from source rather than downloaded from the database repository's CI:
+an artifact of another repository needs a cross-repository token and expires, and building
+it needs nothing the job does not already have. It is cloned outside the workspace, because
+nested inside it MSBuild would walk up from the `.sqlproj` and apply this repository's
+`Directory.Build.props` and central package versions to another repository's build.
+
+Running against that repository's `main` is the point rather than a shortcut: a schema
+change that breaks this API fails a build here, which is the drift ADR-0013 accepts two
+repositories in exchange for catching. It does mean a red build here can belong to a
+commit in the other repository — the job logs the schema commit it tested against, and
+`DATABASE_REF` pins one while a coordinated change lands.
+
+There is no deploy job yet. Deployment is to Azure Container Apps, which needs a container
+image, a registry and a federated credential — none of which exist here so far.
+
 ## Related repositories
 
 | Repository | Contents |

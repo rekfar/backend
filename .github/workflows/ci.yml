@@ -1,0 +1,138 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CONFIGURATION: Release
+  # This repository does not own the schema (ADR-0013), and does not vendor a copy of it
+  # either. The integration tests run against the database repository's current main, so a
+  # schema change that breaks this API fails a build here instead of surviving unnoticed
+  # until a deploy. Change DATABASE_REF to pin a commit while a coordinated change lands.
+  DATABASE_REPOSITORY: https://github.com/rekfar/database.git
+  DATABASE_REF: main
+  DACPAC_PROJECT: src/Rekfar.Database
+
+jobs:
+  build:
+    name: Build & unit tests
+    runs-on: ubuntu-latest
+    # No containers and no other repository here — anything close to this is hung.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # Every version is pinned exactly in Directory.Packages.props, so its hash together
+      # with the project files describes precisely what a restore would download.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore Rekfar.sln
+
+      # TreatWarningsAsErrors is on for every project, so this is the warning gate too.
+      - name: Build
+        run: dotnet build Rekfar.sln --configuration "$CONFIGURATION" --no-restore --nologo
+
+      # The .editorconfig is detailed and deliberate; unenforced it is documentation rather
+      # than a rule, and formatting-only diffs start showing up inside real changes. Fix a
+      # failure by running `dotnet format`, not by loosening the rule it names.
+      - name: Verify formatting
+        run: dotnet format Rekfar.sln --verify-no-changes --no-restore
+
+      # Pure and fast — no database, no container. Kept in its own job from the integration
+      # tests so that a red build says which of the two it is without opening the log.
+      - name: Unit tests
+        run: >
+          dotnet test tests/Rekfar.Catalogue.Tests
+          --configuration "$CONFIGURATION" --no-build --nologo
+          --logger "trx;LogFileName=unit-tests.trx"
+          --results-directory TestResults
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: unit-test-results
+          path: TestResults
+          if-no-files-found: ignore
+          retention-days: 7
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    # SQL Server takes tens of seconds to start and the schema is published into it, so this
+    # is minutes rather than seconds even when everything is well.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      # Built from source rather than downloaded from the database repository's CI: an
+      # artifact of another repository needs a cross-repository token and expires after 30
+      # days, and the dacpac build needs nothing here that this job does not already have.
+      #
+      # Cloned outside the workspace on purpose. Nested inside it, MSBuild would walk up
+      # from the .sqlproj and apply this repository's Directory.Build.props and central
+      # package versions to another repository's build.
+      - name: Build the schema's dacpac
+        run: |
+          set -euo pipefail
+          DATABASE_DIR="$RUNNER_TEMP/database"
+          git clone --depth 1 --branch "$DATABASE_REF" "$DATABASE_REPOSITORY" "$DATABASE_DIR"
+          # Logged so that a failure names the schema it was tested against.
+          git -C "$DATABASE_DIR" log -1 --format='Schema: %H %s'
+          # Release, not $CONFIGURATION: the dacpac is a schema artefact with no debug
+          # variant worth testing against, and Release is where the build writes it.
+          dotnet build "$DATABASE_DIR/$DACPAC_PROJECT" --configuration Release --nologo
+          DACPAC="$DATABASE_DIR/$DACPAC_PROJECT/bin/Release/Rekfar.Database.dacpac"
+          echo "REKFAR_DACPAC=$DACPAC" >> "$GITHUB_ENV"
+
+      - name: Restore
+        run: dotnet restore Rekfar.sln
+
+      - name: Build
+        run: dotnet build Rekfar.sln --configuration "$CONFIGURATION" --no-restore --nologo
+
+      # The tests start SQL Server themselves with Testcontainers and publish REKFAR_DACPAC
+      # into it, so there is no service container to declare here — the runner's Docker
+      # daemon is all they need.
+      - name: Integration tests
+        run: >
+          dotnet test tests/Rekfar.Api.IntegrationTests
+          --configuration "$CONFIGURATION" --no-build --nologo
+          --logger "trx;LogFileName=integration-tests.trx"
+          --results-directory TestResults
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: integration-test-results
+          path: TestResults
+          if-no-files-found: ignore
+          retention-days: 7
