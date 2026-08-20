@@ -10,4 +10,8 @@
     <ProjectReference Include="..\Rekfar.Catalogue\Rekfar.Catalogue.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+  </ItemGroup>
+
 </Project>
