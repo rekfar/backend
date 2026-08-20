@@ -10,6 +10,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Rekfar.Api;
+using Rekfar.Catalogue;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -110,6 +111,11 @@ if (trustForwardedHeaders)
 }
 
 builder.Services.AddHealthChecks();
+
+// --- Modules -----------------------------------------------------------------------
+// Each module registers its own services and maps its own endpoints. The host composes
+// them and owns nothing of their internals.
+builder.Services.AddCatalogueModule(builder.Configuration);
 
 var app = builder.Build();
 
