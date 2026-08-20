@@ -8,10 +8,10 @@ The API is an ASP.NET Core **modular monolith**, versioned at `/v1`. The web cli
 consumer; a future native app is another, so business logic lives here and never in a
 client ([ADR-0004](https://github.com/rekfar/docs/blob/main/adr/0004-web-first-native-later.md)).
 
-> **Status:** Not yet implemented. Roadmap
-> [Phase 1](https://github.com/rekfar/docs/blob/main/architecture/06-roadmap.md) (MVP —
-> account, peak catalogue, trip logging and planning on a Kartverket map) is the first
-> code to land here.
+> **Status:** Early. The API host and the **Catalogue** module are in place, serving
+> `GET /v1/peaks` — the map-extent query the web client draws its markers from. The rest of
+> roadmap [Phase 1](https://github.com/rekfar/docs/blob/main/architecture/06-roadmap.md) —
+> account, trip logging, planning, statistics — is still to come.
 
 ## Stack
 
@@ -36,6 +36,24 @@ Two constraints from that decision are structural, not preferences:
   provider swap plus a data migration rather than a rewrite.
 - **The client is a standalone SPA talking to this API over HTTP only.** No server-rendered
   coupling.
+
+## Getting started
+
+```bash
+dotnet run --project src/Rekfar.Api
+```
+
+The API needs a database, and this repository does not own the schema — see
+[docs/local-development.md](docs/local-development.md) for standing one up, seeding a few
+peaks to draw, and the traps worth knowing about first. The endpoint contract is in
+[docs/api.md](docs/api.md).
+
+```
+src/Rekfar.Api/         Host and composition root: routing, errors, CORS, rate limiting
+src/Rekfar.Catalogue/   The Catalogue module — peaks from Kartverket
+tests/                  Unit tests, and integration tests against a real database
+local/                  Development helpers
+```
 
 ## This repository does not own the schema
 
@@ -86,6 +104,9 @@ Resource-oriented HTTP/JSON, versioned from day one:
 /v1/peaks  /v1/routes   /v1/cabins  /v1/places/{id}/guestbook
 /v1/wishlist  /v1/stats  /v1/activities  /v1/import/gpx  /v1/export
 ```
+
+Of those, `GET /v1/peaks` is the only one that exists so far — see
+[docs/api.md](docs/api.md).
 
 Map-driven endpoints accept a bounding box (`GET /v1/peaks?bbox=…`). All user-data
 endpoints require authentication; the catalogue may allow read-only anonymous access.

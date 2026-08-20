@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Central package management: projects reference packages without a version, and every
+  version in the repository is decided here. One place to read what we depend on, and no
+  way for two projects to drift onto different versions of the same package.
+
+  Versions are pinned exactly. Floating ranges would make a build non-reproducible and let
+  an upstream release break main — the same reasoning the database repository applies to
+  its SqlPackage and Microsoft.Build.Sql versions.
+-->
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinning>true</CentralPackageTransitivePinning>
+  </PropertyGroup>
+
+  <ItemGroup Label="Application">
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
+    <!-- Brings Microsoft.EntityFrameworkCore.SqlServer with it; the geometry types come
+         from NetTopologySuite, never from provider-specific spatial SQL (ADR-0010). -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer.NetTopologySuite" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup Label="Testing">
+    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <!-- Publishes the database repository's dacpac in-process, so the integration tests
+         need no SqlPackage tool on PATH. Same version its CI pins for SqlPackage. -->
+    <PackageVersion Include="Microsoft.SqlServer.DacFx" Version="170.4.83" />
+    <PackageVersion Include="Testcontainers.MsSql" Version="4.14.0" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+</Project>

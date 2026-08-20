@@ -1,0 +1,39 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+*.dll
+*.pdb
+
+# The database schema artefact, fetched from the database repository rather than built
+# here. Integration tests publish it onto a throwaway database — see docs/.
+*.dacpac
+
+# Test output
+[Tt]est[Rr]esult*/
+coverage*.json
+coverage*.xml
+*.trx
+
+# Local secrets and environment
+.env
+*.local
+appsettings.Local.json
+secrets.json
+
+# macOS
+.DS_Store
+
+# Editor / tooling
+.vs/
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.user
+.claude/worktrees/
+
+# Logs
+logs
+*.log

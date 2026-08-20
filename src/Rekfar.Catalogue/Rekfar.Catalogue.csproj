@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Catalogue module: peaks, and later routes and cabins, sourced from Kartverket.
+  Owns its own entities, EF Core configuration and queries, and exposes its endpoints to
+  the host. It reads [ref] tables and writes none of them.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <!-- The module maps its own endpoints, so it needs the ASP.NET Core types. Referencing
+         the shared framework rather than packages keeps it in step with the host. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer.NetTopologySuite" />
+  </ItemGroup>
+
+</Project>

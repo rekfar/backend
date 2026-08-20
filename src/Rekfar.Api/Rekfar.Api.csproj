@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The host and composition root. It wires modules together and owns cross-cutting
+  concerns — routing under /v1, OpenAPI, ProblemDetails, CORS, rate limiting and health.
+  Business logic belongs in a module, never here.
+-->
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Rekfar.Catalogue\Rekfar.Catalogue.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+  </ItemGroup>
+
+</Project>
