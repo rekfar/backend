@@ -169,3 +169,8 @@ var v1 = app.MapGroup("/v1")
 v1.MapCatalogueEndpoints();
 
 app.Run();
+
+// WebApplicationFactory bootstraps the host through its entry-point type, and top-level
+// statements generate an internal one. Surfaced deliberately so the integration tests can
+// exercise the real composition root rather than a rebuilt approximation of it.
+public partial class Program;
