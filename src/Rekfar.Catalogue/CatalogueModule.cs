@@ -31,6 +31,11 @@ public static class CatalogueModule
                 + "locally, or in the container app's configuration.");
         }
 
+        services.AddSingleton(new CatalogueOptions
+        {
+            CacheSeconds = configuration.GetValue("Catalogue:CacheSeconds", 3600),
+        });
+
         var commandTimeout = configuration.GetValue("Database:CommandTimeoutSeconds", 60);
 
         services.AddDbContext<CatalogueDbContext>(options => options

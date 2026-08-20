@@ -160,6 +160,12 @@ app.MapHealthChecks("/health");
 // changes. Modules map their endpoints into this group, which is also where the public
 // rate limit is applied — decided once rather than repeated per endpoint.
 var v1 = app.MapGroup("/v1")
-    .RequireRateLimiting(RateLimitPolicies.Public);
+    .RequireRateLimiting(RateLimitPolicies.Public)
+
+    // Documented on the group because the limit is a property of the group, not of any one
+    // endpoint: every route under /v1 can answer 429.
+    .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+v1.MapCatalogueEndpoints();
 
 app.Run();
