@@ -221,20 +221,53 @@ jobs:
           echo "Deployed to https://$FQDN"
 
       # A deployment that reports success and an application that answers are different
-      # facts. /health is outside /v1 and never rate-limited, and the app scales to zero, so
-      # the first probe here is also paying the cold start.
+      # facts — and /health cannot tell them apart. It deliberately never touches the
+      # database, so it answers 200 even if the managed identity has no rights on [ref].
+      # /v1/peaks is the request that exercises the whole chain: ingress, image, identity,
+      # database user, spatial query. That is what gates the deploy.
       - name: Smoke test
         env:
           FQDN: ${{ steps.deploy.outputs.fqdn }}
         run: |
           set -euo pipefail
-          for _ in $(seq 1 30); do
-            CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://$FQDN/health" || true)"
-            if [ "$CODE" = "200" ]; then
-              echo "Healthy: https://$FQDN/health"
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "::error::/health did not return 200 within 150s (last status: ${CODE:-none})"
-          exit 1
+
+          # Every request is bounded by --max-time, and the loop by wall clock rather than
+          # by a count of attempts. Without both, one hanging connection makes the loop run
+          # far past the deadline it reports — a broken deploy then neither fails promptly
+          # nor gives an error whose stated budget is true.
+          poll() {
+            local url="$1" label="$2" budget="$3" attempt_timeout="$4"
+            local started="$SECONDS" code=000
+
+            while [ $(( SECONDS - started )) -lt "$budget" ]; do
+              code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "$attempt_timeout" "$url" || true)"
+              if [ "$code" = "200" ]; then
+                echo "$label answered 200 after $(( SECONDS - started ))s"
+                return 0
+              fi
+              sleep 5
+            done
+
+            echo "::error::$label did not return 200 within ${budget}s (last status: $code)"
+            return 1
+          }
+
+          # Generous, because a first deploy pays an image pull, revision provisioning and
+          # an ingress certificate before anything answers at all.
+          poll "https://$FQDN/health" "/health" 300 30
+
+          # Shorter budget, longer per-attempt timeout: the database is serverless and
+          # auto-pauses, so this request can spend tens of seconds waiting on a resume.
+          PEAKS="https://$FQDN/v1/peaks?bbox=7.5,61.3,8.8,61.8"
+          poll "$PEAKS" "/v1/peaks" 240 90
+
+          # 200 from the ingress is not proof the API produced it. The contract is a GeoJSON
+          # FeatureCollection, so assert that rather than trusting the status code.
+          BODY="$(curl -sS --max-time 90 "$PEAKS")"
+          if ! grep -q '"type":"FeatureCollection"' <<<"$BODY"; then
+            echo "::error::/v1/peaks returned 200 but not a FeatureCollection"
+            head -c 500 <<<"$BODY"
+            exit 1
+          fi
+
+          echo "Smoke test passed: https://$FQDN"
