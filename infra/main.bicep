@@ -35,13 +35,6 @@ param sqlDatabaseName string = 'Rekfar'
 @description('The web client origin — scheme and host only, no trailing slash, matched exactly against the browser Origin header. The API refuses to start without one (Program.cs), so a wrong value here is a startup failure rather than a silent misconfiguration.')
 param corsAllowedOrigin string = 'https://rekfar.netlify.app'
 
-// The built-in AcrPull role. The identity needs it to pull; nothing here uses registry
-// admin credentials, which is why adminUserEnabled stays false.
-var acrPullRoleDefinitionId = subscriptionResourceId(
-  'Microsoft.Authorization/roleDefinitions',
-  '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-)
-
 // The first deployment has to create the registry that later deployments push to, so there
 // is nothing to pull on that run. Microsoft's quickstart image stands in for one run only.
 var bootstrapImage = 'mcr.microsoft.com/k8se/quickstart:latest'
@@ -82,17 +75,12 @@ resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' 
   location: location
 }
 
-// User-assigned rather than system-assigned: the identity must exist before the app so it
-// can hold AcrPull at first pull, and before the database user can be created for it.
-resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: registry
-  name: guid(registry.id, identity.id, acrPullRoleDefinitionId)
-  properties: {
-    roleDefinitionId: acrPullRoleDefinitionId
-    principalId: identity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
+// The identity's AcrPull assignment is deliberately NOT declared here. Creating a role
+// assignment needs Microsoft.Authorization/roleAssignments/write, which the Contributor role
+// explicitly excludes — so a template containing one cannot be deployed by CI without also
+// granting it User Access Administrator over this group. The grant is made once by hand
+// during the bootstrap instead (docs/operations.md); it never changes afterwards, and this
+// template stays deployable with Contributor alone.
 
 // No appLogsConfiguration, which means a log destination of `none`: console logs are
 // available as a live stream (`az containerapp logs show`) and are not retained anywhere.
@@ -215,9 +203,6 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
       }
     }
   }
-  dependsOn: [
-    acrPull
-  ]
 }
 
 output apiFqdn string = containerApp.properties.configuration.ingress.fqdn
