@@ -136,3 +136,105 @@ jobs:
           path: TestResults
           if-no-files-found: ignore
           retention-days: 7
+
+  # Builds the image without pushing it, so a broken Dockerfile is caught in review rather
+  # than on main. Only on pull requests: the deploy job below builds it anyway, and building
+  # it twice on a push to main would be waste rather than caution.
+  image:
+    name: Container image
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: docker build --tag "rekfar-api:$IMAGE_TAG" .
+
+  deploy:
+    name: Deploy to Azure Container Apps
+    # Both test jobs, not just the build: the integration tests are what prove this API still
+    # agrees with the schema it is about to run against.
+    needs: [build, integration]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Add required reviewers to this environment in the repository settings if a deploy to
+    # main should ever need approval. The environment is also what the federated credential's
+    # subject names — without it, no token is issued.
+    environment: production
+    # The workflow-level concurrency group cancels in-progress runs, which is right for tests
+    # and wrong for a deploy: a second push would abort the first mid-`az deployment`. This
+    # group queues instead.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write   # federated credential — no long-lived secret in the repo
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Tagged with the commit SHA and deployed by that tag, never by `latest`. An immutable
+      # tag is what makes a revision reproducible and a rollback a matter of naming an older
+      # one; `latest` moves, and Container Apps would not reliably see it as a new image.
+      - name: Build and push the image
+        env:
+          REGISTRY: ${{ vars.AZURE_CONTAINER_REGISTRY }}
+          IMAGE_NAME: rekfar-api
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          az acr login --name "$REGISTRY"
+          LOGIN_SERVER="$(az acr show --name "$REGISTRY" --query loginServer -o tsv)"
+          docker build \
+            --tag "$LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG" \
+            --tag "$LOGIN_SERVER/$IMAGE_NAME:latest" \
+            .
+          docker push "$LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG"
+          docker push "$LOGIN_SERVER/$IMAGE_NAME:latest"
+
+      # The whole footprint is described by infra/main.bicep, so this both deploys the new
+      # image and reconciles any drift in the surrounding resources. imageTag is the only
+      # parameter it needs.
+      - name: Deploy
+        id: deploy
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          FQDN="$(az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters imageTag="$IMAGE_TAG" \
+            --query 'properties.outputs.apiFqdn.value' -o tsv)"
+          echo "fqdn=$FQDN" >> "$GITHUB_OUTPUT"
+          echo "Deployed to https://$FQDN"
+
+      # A deployment that reports success and an application that answers are different
+      # facts. /health is outside /v1 and never rate-limited, and the app scales to zero, so
+      # the first probe here is also paying the cold start.
+      - name: Smoke test
+        env:
+          FQDN: ${{ steps.deploy.outputs.fqdn }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://$FQDN/health" || true)"
+            if [ "$CODE" = "200" ]; then
+              echo "Healthy: https://$FQDN/health"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::/health did not return 200 within 150s (last status: ${CODE:-none})"
+          exit 1
