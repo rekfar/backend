@@ -1,0 +1,43 @@
+# The Dockerfile copies global.json, the two props files and src/ — nothing else belongs in
+# the build context. Excluding the rest keeps the context small and, more importantly, keeps
+# a local bin/ or obj/ from being copied over the container's own build output.
+
+.git/
+.github/
+.claude/
+.vs/
+.vscode/
+.idea/
+
+# Build output. Host bin/obj are built against a different SDK layout and would poison the
+# restore and publish layers.
+bin/
+obj/
+**/bin/
+**/obj/
+artifacts/
+TestResults/
+**/TestResults/
+*.dll
+*.pdb
+*.trx
+
+# Not part of the running application.
+tests/
+docs/
+local/
+infra/
+*.md
+*.sln
+.editorconfig
+.gitignore
+.dockerignore
+Dockerfile
+
+# Local secrets and overrides must never reach the build context, let alone a layer.
+.env
+*.local
+**/appsettings.Local.json
+**/secrets.json
+*.log
+.DS_Store
