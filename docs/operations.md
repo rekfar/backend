@@ -94,8 +94,7 @@ so Contributor alone cannot push.
 az deployment group create \
     --resource-group rekfar-api \
     --template-file infra/main.bicep \
-    --parameters imageTag=bootstrap \
-    --parameters corsAllowedOrigin=https://<the-netlify-site>
+    --parameters imageTag=bootstrap
 ```
 
 `imageTag=bootstrap` is a documented escape hatch in the template: it substitutes Microsoft's

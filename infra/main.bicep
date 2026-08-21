@@ -32,8 +32,8 @@ param imageName string = 'rekfar-api'
 param sqlServerName string = 'rekfar'
 param sqlDatabaseName string = 'Rekfar'
 
-@description('The web client origin. The API refuses to start without one (Program.cs), so a wrong value here is a startup failure, not a silent misconfiguration.')
-param corsAllowedOrigin string = 'https://REPLACE-ME.netlify.app'
+@description('The web client origin — scheme and host only, no trailing slash, matched exactly against the browser Origin header. The API refuses to start without one (Program.cs), so a wrong value here is a startup failure rather than a silent misconfiguration.')
+param corsAllowedOrigin string = 'https://rekfar.netlify.app'
 
 // The built-in AcrPull role. The identity needs it to pull; nothing here uses registry
 // admin credentials, which is why adminUserEnabled stays false.
