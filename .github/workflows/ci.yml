@@ -58,12 +58,20 @@ jobs:
         run: dotnet format Rekfar.sln --verify-no-changes --no-restore
 
       # Pure and fast — no database, no container. Kept in its own job from the integration
-      # tests so that a red build says which of the two it is without opening the log.
-      - name: Unit tests
+      # tests so that a red build says which of the two it is without opening the log. One
+      # step per project, for the same reason: the step name says which module broke.
+      - name: Unit tests — catalogue
         run: >
           dotnet test tests/Rekfar.Catalogue.Tests
           --configuration "$CONFIGURATION" --no-build --nologo
-          --logger "trx;LogFileName=unit-tests.trx"
+          --logger "trx;LogFileName=catalogue-tests.trx"
+          --results-directory TestResults
+
+      - name: Unit tests — accounts
+        run: >
+          dotnet test tests/Rekfar.Accounts.Tests
+          --configuration "$CONFIGURATION" --no-build --nologo
+          --logger "trx;LogFileName=accounts-tests.trx"
           --results-directory TestResults
 
       - uses: actions/upload-artifact@v7

@@ -9,6 +9,7 @@ using System.Globalization;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
+using Rekfar.Accounts;
 using Rekfar.Api;
 using Rekfar.Catalogue;
 
@@ -110,12 +111,20 @@ if (trustForwardedHeaders)
     });
 }
 
+// --- Cross-site request forgery ----------------------------------------------------
+// The session is a SameSite=None cookie (ADR-0017), so the browser attaches it to a
+// cross-site post as readily as to the client's own. A header the attacking page cannot
+// set is what separates the two — see AntiForgeryHeader.
+var antiForgeryHeader = builder.Configuration.GetValue(
+    "Security:AntiForgeryHeader", AntiForgeryHeader.DefaultName);
+
 builder.Services.AddHealthChecks();
 
 // --- Modules -----------------------------------------------------------------------
 // Each module registers its own services and maps its own endpoints. The host composes
 // them and owns nothing of their internals.
 builder.Services.AddCatalogueModule(builder.Configuration);
+builder.Services.AddAccountsModule(builder.Configuration, builder.Environment);
 
 var app = builder.Build();
 
@@ -142,6 +151,12 @@ app.UseStatusCodePages();
 app.UseCors(CorsPolicies.WebApp);
 app.UseRateLimiter();
 
+// After CORS, so a preflight is answered rather than challenged, and after the limiter, so
+// an abusive caller is shed before any store is touched. Registered explicitly rather than
+// left to WebApplication's automatic insertion, because that order is the point.
+app.UseAuthentication();
+app.UseAuthorization();
+
 if (app.Environment.IsDevelopment())
 {
     // Development only: the schema of every endpoint is a map of the attack surface, and
@@ -166,7 +181,17 @@ var v1 = app.MapGroup("/v1")
     // endpoint: every route under /v1 can answer 429.
     .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
+if (!string.IsNullOrWhiteSpace(antiForgeryHeader))
+{
+    // Applied to the group, so a module that adds a write endpoint gets it without having to
+    // remember to. Safe methods pass straight through, which is why the anonymous catalogue
+    // read is unaffected.
+    v1.RequireAntiForgeryHeader(antiForgeryHeader);
+}
+
 v1.MapCatalogueEndpoints();
+v1.MapAuthEndpoints();
+v1.MapMeEndpoints();
 
 app.Run();
 

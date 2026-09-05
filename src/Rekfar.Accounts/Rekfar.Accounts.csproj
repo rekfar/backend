@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Auth & Account module: passwordless sign-in and the user's profile. Owns the Identity
+  user row in [auth] and the profile row in [app], its endpoints under /v1/auth and /v1/me,
+  and the email that carries a sign-in code. No password is stored anywhere (ADR-0017).
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <!-- The module maps its own endpoints and owns its cookie configuration, so it needs the
+         ASP.NET Core types. Referencing the shared framework rather than packages keeps it in
+         step with the host. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Identity's EF Core stores, and the SQL Server provider without NetTopologySuite:
+         nothing in this module is spatial. -->
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+
+    <!-- Azure Communication Services Email (ADR-0018), reached with a managed identity so no
+         API key exists to store or leak. -->
+    <PackageReference Include="Azure.Communication.Email" />
+    <PackageReference Include="Azure.Identity" />
+  </ItemGroup>
+
+</Project>

@@ -85,13 +85,59 @@ curl "http://localhost:5199/v1/peaks?bbox=7.5,61.3,8.8,61.8"
 
 The generated OpenAPI document is at `/openapi/v1.json` in Development.
 
+## Signing in locally
+
+There is no email provider locally, and standing up a verified sending domain to try a sign-in
+would be absurd. So when `Auth:Email` is unconfigured the API **writes the code to the log**
+instead of sending it, at `Warning` so it is hard to miss:
+
+```
+warn: Rekfar.Accounts.LogOnlySignInCodeSender[0]
+      No email provider is configured, so no email was sent. The sign-in code for
+      kari@example.no is 428913.
+```
+
+The API refuses to start this way in `Production` — a login code in a production log is a
+credential in a log — so it is a development affordance and not a fallback.
+
+Two things make signing in from `curl` more awkward than from the browser, and both are
+deliberate:
+
+- **Every state-changing request needs the `X-Rekfar-Csrf` header.** Any value will do.
+- **The session cookie is `Secure`**, so `curl` will accept it over `http://localhost` only if
+  you ask it to; browsers treat `localhost` as a secure origin and need no help.
+
+```bash
+curl -s -X POST http://localhost:5199/v1/auth/code \
+    -H 'Content-Type: application/json' -H 'X-Rekfar-Csrf: 1' \
+    -d '{"email":"kari@example.no"}'
+
+# Read the code out of the API's log, then:
+curl -s -X POST http://localhost:5199/v1/auth/verify \
+    -H 'Content-Type: application/json' -H 'X-Rekfar-Csrf: 1' \
+    -c cookies.txt -d '{"email":"kari@example.no","code":"428913"}'
+
+curl -s -b cookies.txt http://localhost:5199/v1/me
+```
+
+The first request creates the account; verifying the code is what confirms the address, and
+there is no password at any point (ADR-0017).
+
+A code lasts about ten minutes and works **once**. Because it is derived from the clock in
+coarse steps, asking for another one straight after using it returns the same digits — which
+are now spent. Wait a few minutes rather than retrying in a loop.
+
+The account rows live in `auth.[User]` and `app.[User]`, so a local database that predates the
+Auth module needs `local/reset.sh` in the database repository before any of this works.
+
 ## Tests
 
 ```bash
 dotnet test
 ```
 
-`Rekfar.Catalogue.Tests` is pure and fast. `Rekfar.Api.IntegrationTests` starts its own SQL
+`Rekfar.Catalogue.Tests` and `Rekfar.Accounts.Tests` are pure and fast — no database, no
+container, no clock to wait on. `Rekfar.Api.IntegrationTests` starts its own SQL
 Server with Testcontainers and publishes the dacpac into it, so it needs a container runtime
 and a built dacpac — from a sibling checkout of the database repository, or pointed at with
 `REKFAR_DACPAC`. Expect the first run to spend around half a minute starting SQL Server.

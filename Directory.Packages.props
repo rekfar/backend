@@ -20,6 +20,15 @@
     <!-- Brings Microsoft.EntityFrameworkCore.SqlServer with it; the geometry types come
          from NetTopologySuite, never from provider-specific spatial SQL (ADR-0010). -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer.NetTopologySuite" Version="10.0.11" />
+    <!-- The Auth & Account module is not spatial, so it takes the plain SQL Server provider.
+         Same version as the one above, which is the point of deciding versions here. -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.11" />
+    <!-- Identity's EF Core stores. Only the user-side entities are used; this schema has no
+         table for roles, claims, logins or tokens, and the model ignores them. -->
+    <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.11" />
+    <!-- Transactional email for sign-in codes (ADR-0018), authenticated by managed identity. -->
+    <PackageVersion Include="Azure.Communication.Email" Version="1.1.0" />
+    <PackageVersion Include="Azure.Identity" Version="1.21.0" />
   </ItemGroup>
 
   <ItemGroup Label="Testing">
