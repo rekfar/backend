@@ -17,6 +17,7 @@ runbook for creating it, backing it up and restoring it. This document assumes i
 | Identity | `rekfar-api`, a user-assigned managed identity |
 | Environment | `rekfar-api-env`, Container Apps consumption, **no log destination** |
 | App | `rekfar-api`, external ingress on 8080, scale-to-zero, `maxReplicas: 1` |
+| Email | `rekfar-comms` and `rekfar-email` (Communication Services), data in **Norway** |
 | Database | `Rekfar` on `rekfar.database.windows.net` — resource group `rekfar`, owned elsewhere |
 
 All of it is described by [`infra/main.bicep`](../infra/main.bicep), which is applied on
@@ -116,10 +117,10 @@ deploying a different default from the one that exists.
 
 Note the outputs: `identityName`, `identityClientId` and `apiFqdn`.
 
-### 5. The two registry grants
+### 5. The three role grants
 
-Both need the registry to exist, which is why they come after the first deployment rather
-than with the Contributor grant in step 3.
+All three need their resource to exist, which is why they come after the first deployment
+rather than with the Contributor grant in step 3.
 
 **`AcrPull` for the container app's identity.** The template deliberately does not declare
 this: creating a role assignment needs `Microsoft.Authorization/roleAssignments/write`, and
@@ -142,36 +143,92 @@ Contributor alone cannot push.
 az role assignment create --assignee "$APP_ID" --role AcrPush --scope "$REGISTRY_ID"
 ```
 
+**Sending email, for the container app's identity.** Same reasoning again, and the same shape:
+the template creates the Communication Services resource but not the role assignment on it.
+
+```bash
+COMMS_ID="$(az deployment group show --resource-group rekfar-api --name main \
+    --query 'properties.outputs.communicationServiceId.value' -o tsv)"
+az role assignment create --assignee-object-id "$IDENTITY_PRINCIPAL_ID" \
+    --assignee-principal-type ServicePrincipal --role Contributor --scope "$COMMS_ID"
+```
+
+`Contributor` is what Communication Services documents for Entra ID access to its data plane;
+scoped to this one resource it grants nothing outside it. Narrow it if a finer built-in role
+for sending mail appears. Without it, `/v1/auth/code` answers 202 — it answers 202 whatever
+happens — and no email is ever sent, so **check the live log** when nobody can sign in.
+
 Until the `AcrPull` grant exists, the container app cannot pull the real image and stays on
 the placeholder. It is the first thing to check when a revision fails to start with an image
 pull error.
 
-### 6. The database user
+### 6. The sending domain
+
+The Communication Services resources come from the template, but a **custom domain is not
+verified by creating it** — that needs DNS records, and the domain stays `Pending` until they
+exist. The Azure managed domain is not an alternative here: it sends from a generated
+`azurecomm.net` subdomain, and mail carrying a login code from a domain nobody recognises is
+mail that reads as phishing (ADR-0018).
+
+Read the records Azure wants and put them in the domain's DNS:
+
+```bash
+az communication email domain show --name rekfar.no \
+    --email-service-name rekfar-email --resource-group rekfar-api \
+    --query 'verificationRecords'
+```
+
+That is a TXT record for ownership, SPF, and two DKIM CNAMEs. Then initiate verification for
+each of them (`az communication email domain initiate-verification`), and check
+`verificationStates` until all are `Verified`.
+
+`Microsoft.Communication` must be registered as a resource provider on the subscription before
+the first deployment: `az provider register --namespace Microsoft.Communication`.
+
+**`dataLocation` is fixed at creation**, exactly like the database's collation. Getting it
+wrong means recreating the resource.
+
+### 7. The database user
 
 Connected as the Entra admin — `sqlcmd` can reuse an `az login` session with
 `--authentication-method ActiveDirectoryDefault`, which avoids handling a password:
 
 ```sql
 CREATE USER [rekfar-api] FROM EXTERNAL PROVIDER;
+
+-- The catalogue reads reference data and writes none of it.
 GRANT SELECT ON SCHEMA::[ref] TO [rekfar-api];
+
+-- The Auth & Account module owns the rows in both of these: it creates the Identity row when
+-- a code is requested, and the profile row when one is first verified.
+GRANT SELECT, INSERT, UPDATE ON SCHEMA::[auth] TO [rekfar-api];
+GRANT SELECT, INSERT, UPDATE ON SCHEMA::[app]  TO [rekfar-api];
 ```
+
+**No `DELETE`, and no rights on `ingest` at all.** Account deletion is FR-ACC-5 and is not in
+this slice; the grant widens again when it arrives, and each widening is worth making
+deliberately rather than granting everything once and forgetting about it.
+
+Note that this is the one part of the deployment that is **not** in `infra/main.bicep`. It
+cannot be: the database lives in the `rekfar` resource group, which the CI deploy principal's
+scope deliberately excludes, and a T-SQL `GRANT` is not an ARM resource. What the template
+must not contain, this document has to — which is why the statements are here in full rather
+than described.
 
 The user name is the managed identity's name — `CREATE USER ... FROM EXTERNAL PROVIDER`
 resolves it by display name, which is why the identity is user-assigned and named
 deliberately.
 
-**`SELECT` on `ref`, and nothing else.** The Catalogue module reads reference data and writes
-none of it. It has no rights on `app`, `auth` or `ingest` at all, following the separate
+The identity remains least-privileged in the way that matters, following the separate
 least-privileged identity the ingestion job uses
-([ADR-0015](https://github.com/rekfar/docs/blob/main/adr/0015-ingestion-lives-in-the-database-repository.md)) —
-an API serving an anonymous map query has no business being able to read a diary note. These
-grants widen when the Auth and Trip modules arrive, and each widening is a decision worth
-making explicitly.
+([ADR-0015](https://github.com/rekfar/docs/blob/main/adr/0015-ingestion-lives-in-the-database-repository.md)):
+the API can read and write accounts, and it can read reference data, and it can do nothing to
+the ingestion staging tables at all.
 
 The server's existing `AllowAllWindowsAzureIps` firewall rule already covers the container
 app's egress. Confirm it rather than assume it; nothing new should be needed.
 
-### 7. Repository secrets and variables
+### 8. Repository secrets and variables
 
 Secrets — *Settings → Secrets and variables → Actions*:
 
@@ -245,6 +302,23 @@ property on the managed environment — and revisit T10 in
 [ADR-0010](https://github.com/rekfar/docs/blob/main/adr/0010-tech-stack-dotnet-azure-sql.md),
 which still has no error tracker chosen.
 
+## Sessions and deploys
+
+**Every new revision signs everybody out.** The session cookie is encrypted with ASP.NET Core
+Data Protection keys, and with no configured key store those keys live in the container's
+filesystem — so a new revision generates new ones and cannot read a cookie the old revision
+issued. The user sees a signed-out app and has to ask for a new code.
+
+That is worse here than it would be with a password: signing in again costs an email
+round-trip. It is not fixed in this slice because every fix adds a resource this deployment
+does not yet have — a storage account or a key vault for the keys, or a table in a schema this
+repository does not own. **Persisting the keys is the first thing to do when blob storage
+arrives** for photos and GPX; one call to `PersistKeysToAzureBlobStorage` against the same
+managed identity is the whole change.
+
+Until then, deploy with it in mind: a deploy is user-visible, and a run of deploys is a run of
+sign-ins.
+
 ## Cold starts
 
 Two of them stack on the first request after an idle period:
@@ -278,6 +352,9 @@ Mitigations, in order of preference: raise the database's auto-pause delay; rais
 | Every caller shares one rate-limit partition | `Hosting__TrustForwardedHeaders` is not `true`. Behind the ingress the app otherwise sees the proxy's address for everyone. |
 | CORS errors in the browser, `curl` fine | `corsAllowedOrigin` does not match the site's origin exactly — scheme and host, no trailing slash. |
 | A deploy changed nothing | Deploying the same `imageTag` twice is a no-op by design. Check the SHA in the job log. |
+| Revision won't start, log names `Auth:Email:Endpoint` | The app refuses to start in Production without a sender, deliberately: the only other sender writes login codes to the log. Deploy the template, which sets it. |
+| Nobody can sign in, `/v1/auth/code` still answers 202 | It answers 202 whatever happens, by design. Either the identity's role on the Communication Services resource (step 5) is missing, or the sending domain is still `Pending` (step 6). The live log says which. |
+| Everyone was signed out by a deploy | Expected today — see *Sessions and deploys* below. |
 
 ### Checking for drift
 

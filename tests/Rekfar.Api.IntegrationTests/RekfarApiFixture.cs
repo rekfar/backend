@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SqlServer.Dac;
+using Rekfar.Accounts;
 using Testcontainers.MsSql;
 
 namespace Rekfar.Api.IntegrationTests;
@@ -25,10 +27,31 @@ public sealed class RekfarApiFixture : IAsyncLifetime
     // otherwise differ from production in exactly the place Norwegian names live.
     private const string Collation = "Norwegian_100_CI_AS";
 
+    /// <summary>
+    /// The header the host requires on every state-changing request. Its value is never
+    /// checked; being able to send it at all is the point (see AntiForgeryHeader).
+    /// </summary>
+    private const string AntiForgeryHeader = "X-Rekfar-Csrf";
+
     private MsSqlContainer _container = null!;
     private WebApplicationFactory<Program> _factory = null!;
 
     public HttpClient Client { get; private set; } = null!;
+
+    /// <summary>
+    /// The sign-in codes the API tried to send. The tests read a code the way its owner does —
+    /// out of the message the module decided to send — rather than by asking Identity to
+    /// generate one again, so what is asserted is the whole path from request to inbox.
+    /// </summary>
+    public CapturingSignInCodeSender Emails { get; } = new();
+
+    /// <summary>
+    /// The database behind the API, for the few assertions that are about rows rather than
+    /// responses — that Identity really did land in <c>auth.[User]</c> and the profile in
+    /// <c>app.[User]</c>, sharing one key. Mapping onto a schema this repository does not own
+    /// is exactly the thing worth checking against the schema itself.
+    /// </summary>
+    public string ConnectionString { get; private set; } = null!;
 
     public async Task InitializeAsync()
     {
@@ -50,6 +73,8 @@ public sealed class RekfarApiFixture : IAsyncLifetime
             InitialCatalog = DatabaseName,
         }.ConnectionString;
 
+        ConnectionString = connectionString;
+
         await SeedAsync(connectionString);
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
@@ -58,6 +83,8 @@ public sealed class RekfarApiFixture : IAsyncLifetime
             // these tests assert, and production's error shape is the one worth testing.
             builder.UseEnvironment("Testing");
 
+            // Both modules read the same connection string name, so this one setting covers
+            // the catalogue's context and the account module's.
             builder.UseSetting($"ConnectionStrings:{Catalogue.CatalogueModule.ConnectionStringName}", connectionString);
             builder.UseSetting("Cors:AllowedOrigins:0", "https://rekfar.test");
 
@@ -67,9 +94,53 @@ public sealed class RekfarApiFixture : IAsyncLifetime
 
             // The limiter has its own tests; here it would only make the suite flaky.
             builder.UseSetting("RateLimiting:PermitLimit", "10000");
+
+            // Every test shares one caller as far as the limiter can tell — TestServer has no
+            // remote address — so the per-caller budget for sign-in codes has to hold the whole
+            // suite. The per-address budget is the one these tests actually exercise, and it is
+            // left at its real value because each test uses an address of its own.
+            builder.UseSetting("Auth:CodeRequestRateLimit", "10000");
+
+            // Zero, so a revoked session is rejected on its next request rather than up to five
+            // minutes later. The five minutes are the deployed value and the whole point of the
+            // setting; a test cannot wait them out and still be a test.
+            builder.UseSetting("Auth:SecurityStampValidationSeconds", "0");
+
+            builder.ConfigureServices(services =>
+                services.AddSingleton<ISignInCodeSender>(Emails));
         });
 
-        Client = _factory.CreateClient();
+        // Through CreateClient rather than the factory directly, so the one shared client has
+        // the https base address and the anti-forgery header too. Nothing using it today needs
+        // either — the catalogue is anonymous and read-only — but a client that silently drops
+        // the session cookie is not a thing to leave lying about.
+        Client = CreateClient();
+    }
+
+    /// <summary>
+    /// A client with its own cookie jar — one browser, one device.
+    /// </summary>
+    /// <param name="handleCookies">
+    /// False for a client that manages the session cookie by hand, which is how a second device
+    /// is simulated.
+    /// </param>
+    /// <remarks>
+    /// The base address is <c>https</c> deliberately. The session cookie is issued
+    /// <c>Secure</c> in every environment, and <see cref="System.Net.CookieContainer"/> honours
+    /// that: over <c>http</c> it would store the cookie and never send it back, and every
+    /// authenticated test would fail for a reason that has nothing to do with the API.
+    /// </remarks>
+    public HttpClient CreateClient(bool handleCookies = true)
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost"),
+            HandleCookies = handleCookies,
+        });
+
+        client.DefaultRequestHeaders.Add(AntiForgeryHeader, "1");
+
+        return client;
     }
 
     public async Task DisposeAsync()

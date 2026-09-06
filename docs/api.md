@@ -16,7 +16,15 @@ These are decided once, in the host, and every endpoint inherits them.
 | Rate limiting | Per caller, on the `/v1` group. Health probes sit outside it and are never throttled. |
 | CORS | An explicit origin list. The API refuses to start without one, naming the environment it looked in. |
 | OpenAPI | Generated from the endpoints, served at `/openapi/v1.json` **in Development only** — the document is a map of the attack surface, and CI can generate it for client generation without the production API publishing it. |
-| Auth | None yet. The catalogue is readable anonymously by design (FR-PEAK-5); every user-data endpoint that follows will require authentication. |
+| Auth | An `HttpOnly` session cookie, issued by `POST /v1/auth/verify`. Every user-data endpoint requires it (NFR-SEC-3); the catalogue is readable anonymously by design (FR-PEAK-5). |
+| CSRF | Every state-changing request under `/v1` must carry `X-Rekfar-Csrf` (any value). Safe methods do not. |
+
+**On `X-Rekfar-Csrf`.** The session cookie is `SameSite=None` (the client and the API are on
+different sites), so a browser would attach it to a cross-site form post as readily as to the
+client's own request. A required header is what separates them: a header the page did not get
+for free makes the request non-simple, so the browser asks for a CORS preflight first, and the
+preflight is answered against the origin allowlist. The value is never checked — being able to
+set it at all is the proof. A request without it is `403`.
 
 `GET /health` is liveness only and sits outside `/v1`. It deliberately does **not**
 touch the database: the free-offer database is serverless and auto-pauses, so a
@@ -122,12 +130,131 @@ and for a `limit` outside 1–1000. `429` when the rate limit is exceeded, with 
 curl "http://localhost:5199/v1/peaks?bbox=7.5,61.3,8.8,61.8"
 ```
 
+## Sign in
+
+Registration and login are the same flow
+([ADR-0017](https://github.com/rekfar/docs/blob/main/adr/0017-passwordless-email-sign-in.md)).
+There is **no password anywhere in Rekfar** and no register endpoint: an address nobody has
+used gets an account the first time somebody proves they can read it, and verifying the code
+*is* the email confirmation.
+
+### `POST /v1/auth/code`
+
+Emails a one-time code. Anonymous.
+
+```json
+{ "email": "kari@example.no" }
+```
+
+`202 Accepted`, with an empty body, **whether or not the address has an account, and whether
+or not a code was actually sent.** That is the contract, not an implementation detail: any
+other answer would let an anonymous caller ask this endpoint which addresses are registered.
+A request beyond the address's allowance is answered the same way and sends nothing.
+
+`400` only for a malformed address, which is a fact about the request rather than about an
+inbox. `429` when the *caller* has asked too often — a much smaller budget than the general
+`/v1` limit, because this endpoint sends email on an anonymous caller's say-so (NFR-SEC-4).
+
+### `POST /v1/auth/verify`
+
+```json
+{ "email": "kari@example.no", "code": "428913" }
+```
+
+`200 OK` with the profile — the same shape `GET /v1/me` returns — and a `Set-Cookie` carrying
+the session. Returning the profile here saves a client that has just signed in a second round
+trip to render itself.
+
+`401` for a code that is wrong, expired, already used, or for an address with no account: one
+message for all four, because distinguishing them would answer the question the code endpoint
+refuses to. `429` once the address has used up its guesses.
+
+**About the code.** Six digits, from ASP.NET Core Identity's TOTP-style email token provider.
+It is derived from the user's security stamp and the clock, so **nothing is stored** — there is
+no token table in the schema and none is needed. Three consequences are worth knowing:
+
+- **It is valid for roughly ten minutes**, as a window around its issue rather than a countdown
+  from it.
+- **It is single-use.** The API remembers that a code has signed somebody in and refuses it
+  afterwards. That memory is in the process, which is one more reason `maxReplicas` is 1.
+- **A code re-requested within a few minutes is the same code**, because it is derived from the
+  clock in coarse steps. A code that has already been used therefore stays used until the step
+  rolls over — so signing in twice in quick succession may need a short wait. This is the cost
+  of a token that survives the container restarting between the request and the reply, which on
+  a scale-to-zero deployment it will.
+
+### `POST /v1/auth/signout`
+
+Ends this session, server-side and not only by clearing the cookie (FR-ACC-2). `204`.
+
+### `POST /v1/auth/signout-all`
+
+Ends every session on every device by rotating the security stamp. `204`.
+
+With no password to change, this is the **only lever a user has over a device they no longer
+hold**, which is why it ships in the MVP rather than later. Other devices stop working within
+the security-stamp validation interval — **five minutes** — rather than instantly; that
+interval *is* the window in which a revoked session still works. The calling device's own
+cookie is cleared immediately.
+
+Outstanding sign-in codes are derived from the same stamp, so they stop verifying too.
+
+### The session
+
+| | |
+| --- | --- |
+| Cookie | `__Host-rekfar.session` — `HttpOnly`, `Secure`, `SameSite=None`, path `/`, no domain |
+| Lifetime | 90 days, **sliding**, renewed on use. No absolute cap in Phase 1 |
+| Revocation | `signout` (this device) or `signout-all` (everywhere), within five minutes |
+
+Long on purpose. With a password, an expired session costs the user a form they can fill from
+memory; here it costs an email round-trip — latency, a spam folder, and a device that may not
+have the inbox on it. The session is long and revocation is explicit rather than time-based
+([the MVP plan §7](https://github.com/rekfar/docs/blob/main/architecture/user-accounts-mvp-plan.md)).
+
+There is no device or session list in Phase 1.
+
+## `GET /v1/me`
+
+The signed-in user. Requires a session.
+
+```json
+{
+  "email": "kari@example.no",
+  "displayName": "Kari Nordmann",
+  "locale": "nb-NO"
+}
+```
+
+Three fields, because that is what an account is (P9, NFR-PRIV-2). `email` is the credential
+and cannot be changed here. Default privacy is FR-ACC-4 and is not on the wire until trips can
+act on it.
+
+A new account's `displayName` is seeded from the address's local part — the column is NOT NULL
+and nothing else about the person is known yet.
+
+## `PATCH /v1/me`
+
+```json
+{ "displayName": "Kari Nordmann", "locale": "nn-NO" }
+```
+
+Both fields are optional; one that is absent or `null` is left as it is, which is what makes
+this a PATCH. Returns the profile as it now stands.
+
+- `displayName` is trimmed, and must be 1–80 characters afterwards.
+- `locale` is a BCP-47 tag the server's ICU data actually knows, at most 16 characters. `nb-NO`
+  is the first locale.
+
+`400` names which field was wrong, and nothing is applied when either is — a rejected locale
+cannot leave a new display name behind it.
+
 ## Not implemented yet
 
 The resource list in the
 [application architecture](https://github.com/rekfar/docs/blob/main/architecture/04-application-architecture.md)
-names `/v1/auth`, `/v1/me`, `/v1/trips`, `/v1/plans`, `/v1/wishlist`, `/v1/stats` and the
-rest. None of them exist yet.
+names `/v1/trips`, `/v1/plans`, `/v1/wishlist`, `/v1/stats` and the rest. None of them exist
+yet; `/v1/auth` and `/v1/me` above are the first that do.
 
 One consequence is visible in this endpoint: sequence 4.1 of that document has the map
 asking which peaks the user has bagged. That needs authentication and trips, so it is

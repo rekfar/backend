@@ -16,11 +16,12 @@ WORKDIR /src
 # and Directory.Build.props is where TargetFramework and the strictness flags live.
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY src/Rekfar.Api/Rekfar.Api.csproj src/Rekfar.Api/
+COPY src/Rekfar.Accounts/Rekfar.Accounts.csproj src/Rekfar.Accounts/
 COPY src/Rekfar.Catalogue/Rekfar.Catalogue.csproj src/Rekfar.Catalogue/
 
 # The host project, not the solution: the tests are not in the image, and restoring them
 # would pull DacFx and Testcontainers for nothing. Project references restore transitively,
-# so this covers Rekfar.Catalogue.
+# so this covers Rekfar.Accounts and Rekfar.Catalogue.
 RUN dotnet restore src/Rekfar.Api/Rekfar.Api.csproj
 
 COPY src/ src/
