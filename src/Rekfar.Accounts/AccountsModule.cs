@@ -220,7 +220,8 @@ public static class AccountsModule
     private static TokenCredential Credential(SignInEmailOptions email) =>
         string.IsNullOrWhiteSpace(email.ManagedIdentityClientId)
             ? new DefaultAzureCredential()
-            : new ManagedIdentityCredential(email.ManagedIdentityClientId);
+            : new ManagedIdentityCredential(
+                ManagedIdentityId.FromUserAssignedClientId(email.ManagedIdentityClientId));
 
     private static Func<RedirectContext<CookieAuthenticationOptions>, Task> ToStatusCode(int statusCode) =>
         context =>
