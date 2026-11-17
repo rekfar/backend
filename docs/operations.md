@@ -35,6 +35,25 @@ Entra, which needs no ARM rights at all.
 The order matters, and CI cannot do the first run: it pushes to a registry that this template
 is what creates.
 
+### Prerequisites, on the subscription
+
+Not steps in creating this resource group — things that must already be true of the
+subscription it lives in, and that nothing below can do for itself.
+
+**Register the resource providers the template uses.** A subscription serves only the
+namespaces it is registered for, and registering one is a subscription-level action: the
+deploy principal holds `Contributor` scoped to this resource group alone and cannot do it.
+
+```bash
+az provider register --namespace Microsoft.Communication
+az provider show --namespace Microsoft.Communication --query registrationState
+```
+
+Wait for `Registered` — it takes a few minutes. Skip this and the first deployment fails with
+`MissingSubscriptionRegistration` naming the namespace, after the image has already been built
+and pushed. `Microsoft.App`, `Microsoft.ContainerRegistry` and `Microsoft.ManagedIdentity` are
+usually registered already; `az provider show` answers for any of them.
+
 ### 1. The resource group
 
 ```bash
@@ -173,7 +192,7 @@ mail that reads as phishing (ADR-0018).
 Read the records Azure wants and put them in the domain's DNS:
 
 ```bash
-az communication email domain show --name rekfar.no \
+az communication email domain show --name mail.danotographer.com \
     --email-service-name rekfar-email --resource-group rekfar-api \
     --query 'verificationRecords'
 ```
@@ -181,6 +200,35 @@ az communication email domain show --name rekfar.no \
 That is a TXT record for ownership, SPF, and two DKIM CNAMEs. Then initiate verification for
 each of them (`az communication email domain initiate-verification`), and check
 `verificationStates` until all are `Verified`.
+
+**The sending domain is a subdomain, and that is the point.** `danotographer.com` is somebody's
+working domain and already has an SPF record; a domain may have exactly one, so adding Azure's
+as a second TXT record there would not add a sender — it would make the apex fail SPF outright,
+for every message it sends, Rekfar's and its owner's alike. `mail.danotographer.com` gets its
+own SPF record and its own sending reputation instead. **Nothing below touches the apex's
+existing mail**, and nothing Rekfar does to its deliverability can reach it.
+
+**Every record goes at the subdomain, and DNS forms want them relative.** Azure names records
+in full; a provider's host field is almost always relative to the zone, so each one loses the
+`.danotographer.com`:
+
+| Azure says | Host field |
+| --- | --- |
+| `mail.danotographer.com` TXT, value `ms-domain-verification=…` | `mail` |
+| `mail.danotographer.com` TXT, value `v=spf1 include:…` | `mail` |
+| `selector1-azurecomm-prod-net._domainkey.mail.danotographer.com` | `selector1-azurecomm-prod-net._domainkey.mail` |
+| `selector2-azurecomm-prod-net._domainkey.mail.danotographer.com` | `selector2-azurecomm-prod-net._domainkey.mail` |
+
+The two TXT records share a name and differ only in value, which is allowed. What the table is
+for is the transformation; `verificationRecords` above is authoritative for the values.
+
+Dropping the trailing `.mail` on the DKIM selectors is the easy mistake: the records land on the
+apex, the subdomain stays `Pending`, and nothing says why. Check with
+`dig TXT mail.danotographer.com` and `dig CNAME selector1-azurecomm-prod-net._domainkey.mail.danotographer.com`
+before asking Azure to verify.
+
+No MX record is needed. The subdomain only sends; a reply to the From address has nowhere to
+land, which is worth knowing before putting it in front of users.
 
 **Then link it.** Azure refuses to link a domain to the Communication Services resource until
 it is verified, and the domain cannot be verified before the template has created it. So the
@@ -192,8 +240,16 @@ deploy it. Until then **no sign-in code is delivered** — `/v1/auth/code` still
 Leave it `true` from then on. A deployment with `false` unlinks the domain, and sign-in mail
 stops with nothing failing loudly.
 
-`Microsoft.Communication` must be registered as a resource provider on the subscription before
-the first deployment: `az provider register --namespace Microsoft.Communication`.
+That same deployment provisions the From address. Adding a domain gives Azure exactly one
+MailFrom address, `donotreply`, so `rekfar@mail.danotographer.com` is a resource the template has to
+declare — `senderMailFrom` in `infra/main.bicep`, named from the local part of `senderAddress`
+so the two cannot drift. Without it every send fails on an address that reads as correct in
+configuration. Check it landed:
+
+```bash
+az communication email domain sender-username list --domain-name mail.danotographer.com \
+    --email-service-name rekfar-email --resource-group rekfar-api -o table
+```
 
 **`dataLocation` is fixed at creation**, exactly like the database's collation. Getting it
 wrong means recreating the resource.
@@ -357,8 +413,8 @@ Mitigations, in order of preference: raise the database's auto-pause delay; rais
 | `AADSTS700213` in `azure/login` | The federated credential's subject. Read the error — it names the subject GitHub sent. See step 2. |
 | `az acr login` succeeds, `docker push` gets 403 | `AcrPush` is missing. `Contributor` does not imply it. |
 | Revision unhealthy, container exits immediately | Almost always configuration. The app fails fast by design: no `Cors:AllowedOrigins` and no connection string are both startup exceptions naming what is missing. Read the system logs. |
-| `Login failed for user '<token-identified principal>'` | The database user in step 6 was never created, or was created under a different name than the identity's. |
-| Deploy fails with `MissingSubscriptionRegistration` for `Microsoft.Communication` | The resource provider was never registered on the subscription. See step 6. |
+| `Login failed for user '<token-identified principal>'` | The database user in step 7 was never created, or was created under a different name than the identity's. |
+| Deploy fails with `MissingSubscriptionRegistration` for `Microsoft.Communication` | The resource provider was never registered on the subscription. See *Prerequisites* above — it cannot be done from CI. |
 | Deploy fails with `DomainValidationError` | `senderDomainVerified` is `true` but the domain is not verified yet. See step 6. |
 | `/v1/auth/code` answers 202 and no email arrives | The domain is not linked (`senderDomainVerified` still `false`), or the identity lacks its role on the Communication Services resource (step 5). |
 | Revision stuck on the placeholder image, or an image pull failure | The identity's `AcrPull` grant from step 5 is missing. |

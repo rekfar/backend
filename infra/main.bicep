@@ -49,7 +49,7 @@ param emailServiceName string = 'rekfar-email'
 param emailDataLocation string = 'Norway'
 
 @description('The custom domain sign-in codes are sent from. Customer-managed, so it stays Pending until its SPF, DKIM and verification DNS records exist — see docs/operations.md. Azure managed domains send from a generated azurecomm.net subdomain, which is not acceptable for mail carrying a login code.')
-param senderDomain string = 'rekfar.no'
+param senderDomain string = 'mail.danotographer.com'
 
 // Linking an unverified customer-managed domain is refused outright (DomainValidationError),
 // and it cannot be verified before this template has created it, so a fresh environment needs
@@ -60,8 +60,15 @@ param senderDomain string = 'rekfar.no'
 @description('Whether senderDomain has passed DNS verification and can be linked to the Communication Services resource. Until it is, the resource exists without a sending domain and no sign-in code is delivered. See docs/operations.md.')
 param senderDomainVerified bool = false
 
-@description('The From address, which must be on senderDomain. No-reply because there is nothing to reply to: the mail carries a code and asks for nothing back.')
-param senderAddress string = 'ikke-svar@rekfar.no'
+@description('The From address, which must be on senderDomain, and whose local part is provisioned below as a MailFrom address. A subdomain dedicated to this, so Rekfar sends under its own SPF record and its own reputation rather than the apex\'s.')
+param senderAddress string = 'rekfar@mail.danotographer.com'
+
+@description('The name a recipient sees beside the From address.')
+param senderDisplayName string = 'Rekfar'
+
+// The local part of senderAddress, which is also the name of the MailFrom resource below.
+// Derived rather than given as a second parameter, so the two cannot disagree.
+var senderLocalPart = split(senderAddress, '@')[0]
 
 // The first deployment has to create the registry that later deployments push to, so there
 // is nothing to pull on that run. Microsoft's quickstart image stands in for one run only.
@@ -128,6 +135,22 @@ resource emailDomain 'Microsoft.Communication/emailServices/domains@2023-04-01' 
     // Open and click tracking rewrites links and adds a pixel. In a message whose entire
     // content is a login code, that is telemetry about nothing and a reason to distrust it.
     userEngagementTracking: 'Disabled'
+  }
+}
+
+// Azure provisions exactly one MailFrom address when a domain is added — `donotreply` — so any
+// other From address is a resource that has to be declared. Without this, every send fails on
+// an address that looks perfectly correct in configuration.
+//
+// Gated on verification for the same reason the link below is: the domain has to be verified
+// before Azure will accept anything hung off it, and a fresh environment creates the domain in
+// a deployment that runs before any DNS exists.
+resource senderMailFrom 'Microsoft.Communication/emailServices/domains/senderUsernames@2023-04-01' = if (senderDomainVerified) {
+  parent: emailDomain
+  name: senderLocalPart
+  properties: {
+    username: senderLocalPart
+    displayName: senderDisplayName
   }
 }
 
