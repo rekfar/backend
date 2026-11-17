@@ -49,7 +49,7 @@ param emailServiceName string = 'rekfar-email'
 param emailDataLocation string = 'Norway'
 
 @description('The custom domain sign-in codes are sent from. Customer-managed, so it stays Pending until its SPF, DKIM and verification DNS records exist — see docs/operations.md. Azure managed domains send from a generated azurecomm.net subdomain, which is not acceptable for mail carrying a login code.')
-param senderDomain string = 'danotographer.com'
+param senderDomain string = 'mail.danotographer.com'
 
 // Linking an unverified customer-managed domain is refused outright (DomainValidationError),
 // and it cannot be verified before this template has created it, so a fresh environment needs
@@ -60,8 +60,8 @@ param senderDomain string = 'danotographer.com'
 @description('Whether senderDomain has passed DNS verification and can be linked to the Communication Services resource. Until it is, the resource exists without a sending domain and no sign-in code is delivered. See docs/operations.md.')
 param senderDomainVerified bool = false
 
-@description('The From address, which must be on senderDomain, and whose local part is provisioned below as a MailFrom address. Not a no-reply mailbox: the domain is shared with its owner\'s other mail, and a reply reaching a person is better than a reply bouncing.')
-param senderAddress string = 'rekfar@danotographer.com'
+@description('The From address, which must be on senderDomain, and whose local part is provisioned below as a MailFrom address. A subdomain dedicated to this, so Rekfar sends under its own SPF record and its own reputation rather than the apex\'s.')
+param senderAddress string = 'rekfar@mail.danotographer.com'
 
 @description('The name a recipient sees beside the From address.')
 param senderDisplayName string = 'Rekfar'

@@ -192,7 +192,7 @@ mail that reads as phishing (ADR-0018).
 Read the records Azure wants and put them in the domain's DNS:
 
 ```bash
-az communication email domain show --name danotographer.com \
+az communication email domain show --name mail.danotographer.com \
     --email-service-name rekfar-email --resource-group rekfar-api \
     --query 'verificationRecords'
 ```
@@ -201,23 +201,34 @@ That is a TXT record for ownership, SPF, and two DKIM CNAMEs. Then initiate veri
 each of them (`az communication email domain initiate-verification`), and check
 `verificationStates` until all are `Verified`.
 
-**The sending domain is not Rekfar's own, and that matters for SPF.** `danotographer.com`
-carries its owner's other mail, so it almost certainly already has an SPF record. **A domain
-may have exactly one.** Adding Azure's as a second TXT record does not add a sender — it makes
-the domain fail SPF outright, for every message it sends, Rekfar's and everything else's. Merge
-the `include:` Azure asks for into the existing record instead:
+**The sending domain is a subdomain, and that is the point.** `danotographer.com` is somebody's
+working domain and already has an SPF record; a domain may have exactly one, so adding Azure's
+as a second TXT record there would not add a sender — it would make the apex fail SPF outright,
+for every message it sends, Rekfar's and its owner's alike. `mail.danotographer.com` gets its
+own SPF record and its own sending reputation instead. **Nothing below touches the apex's
+existing mail**, and nothing Rekfar does to its deliverability can reach it.
 
-```
-v=spf1 include:_spf.google.com include:spf.protection.outlook.com -all
-```
+**Every record goes at the subdomain, and DNS forms want them relative.** Azure names records
+in full; a provider's host field is almost always relative to the zone, so each one loses the
+`.danotographer.com`:
 
-DKIM is safe by comparison: Azure's selectors are its own, so the two CNAMEs sit beside any
-existing DKIM without touching it.
+| Azure says | Host field |
+| --- | --- |
+| `mail.danotographer.com` TXT, value `ms-domain-verification=…` | `mail` |
+| `mail.danotographer.com` TXT, value `v=spf1 include:…` | `mail` |
+| `selector1-azurecomm-prod-net._domainkey.mail.danotographer.com` | `selector1-azurecomm-prod-net._domainkey.mail` |
+| `selector2-azurecomm-prod-net._domainkey.mail.danotographer.com` | `selector2-azurecomm-prod-net._domainkey.mail` |
 
-If that merge is unwelcome on a working business domain, send from a subdomain instead — set
-`senderDomain` to something like `mail.danotographer.com` and `senderAddress` to a local part
-on it. A subdomain gets its own SPF record and its own reputation, and nothing you do to it can
-affect the apex's mail.
+The two TXT records share a name and differ only in value, which is allowed. What the table is
+for is the transformation; `verificationRecords` above is authoritative for the values.
+
+Dropping the trailing `.mail` on the DKIM selectors is the easy mistake: the records land on the
+apex, the subdomain stays `Pending`, and nothing says why. Check with
+`dig TXT mail.danotographer.com` and `dig CNAME selector1-azurecomm-prod-net._domainkey.mail.danotographer.com`
+before asking Azure to verify.
+
+No MX record is needed. The subdomain only sends; a reply to the From address has nowhere to
+land, which is worth knowing before putting it in front of users.
 
 **Then link it.** Azure refuses to link a domain to the Communication Services resource until
 it is verified, and the domain cannot be verified before the template has created it. So the
@@ -230,13 +241,13 @@ Leave it `true` from then on. A deployment with `false` unlinks the domain, and 
 stops with nothing failing loudly.
 
 That same deployment provisions the From address. Adding a domain gives Azure exactly one
-MailFrom address, `donotreply`, so `rekfar@danotographer.com` is a resource the template has to
+MailFrom address, `donotreply`, so `rekfar@mail.danotographer.com` is a resource the template has to
 declare — `senderMailFrom` in `infra/main.bicep`, named from the local part of `senderAddress`
 so the two cannot drift. Without it every send fails on an address that reads as correct in
 configuration. Check it landed:
 
 ```bash
-az communication email domain sender-username list --domain-name danotographer.com \
+az communication email domain sender-username list --domain-name mail.danotographer.com \
     --email-service-name rekfar-email --resource-group rekfar-api -o table
 ```
 
