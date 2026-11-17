@@ -180,7 +180,7 @@ Three things about it are decisions rather than defaults:
   reached over Entra, so neither a password nor an API key exists anywhere in the deployment —
   there are no Container Apps secrets at all. Its database rights are `SELECT` on `[ref]` plus
   read and write on `[auth]` and `[app]`, and nothing else; each widening is a decision made
-  deliberately (docs/operations.md, step 6).
+  deliberately (docs/operations.md, step 7).
 - **The runtime image is the `-extra` chiseled variant**, because
   `InvariantGlobalization=false` means the application needs ICU and the bare chiseled image
   has none. It fails at startup without it.

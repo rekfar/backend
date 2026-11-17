@@ -35,6 +35,25 @@ Entra, which needs no ARM rights at all.
 The order matters, and CI cannot do the first run: it pushes to a registry that this template
 is what creates.
 
+### Prerequisites, on the subscription
+
+Not steps in creating this resource group — things that must already be true of the
+subscription it lives in, and that nothing below can do for itself.
+
+**Register the resource providers the template uses.** A subscription serves only the
+namespaces it is registered for, and registering one is a subscription-level action: the
+deploy principal holds `Contributor` scoped to this resource group alone and cannot do it.
+
+```bash
+az provider register --namespace Microsoft.Communication
+az provider show --namespace Microsoft.Communication --query registrationState
+```
+
+Wait for `Registered` — it takes a few minutes. Skip this and the first deployment fails with
+`MissingSubscriptionRegistration` naming the namespace, after the image has already been built
+and pushed. `Microsoft.App`, `Microsoft.ContainerRegistry` and `Microsoft.ManagedIdentity` are
+usually registered already; `az provider show` answers for any of them.
+
 ### 1. The resource group
 
 ```bash
@@ -191,9 +210,6 @@ deploy it. Until then **no sign-in code is delivered** — `/v1/auth/code` still
 
 Leave it `true` from then on. A deployment with `false` unlinks the domain, and sign-in mail
 stops with nothing failing loudly.
-
-`Microsoft.Communication` must be registered as a resource provider on the subscription before
-the first deployment: `az provider register --namespace Microsoft.Communication`.
 
 **`dataLocation` is fixed at creation**, exactly like the database's collation. Getting it
 wrong means recreating the resource.
@@ -357,8 +373,8 @@ Mitigations, in order of preference: raise the database's auto-pause delay; rais
 | `AADSTS700213` in `azure/login` | The federated credential's subject. Read the error — it names the subject GitHub sent. See step 2. |
 | `az acr login` succeeds, `docker push` gets 403 | `AcrPush` is missing. `Contributor` does not imply it. |
 | Revision unhealthy, container exits immediately | Almost always configuration. The app fails fast by design: no `Cors:AllowedOrigins` and no connection string are both startup exceptions naming what is missing. Read the system logs. |
-| `Login failed for user '<token-identified principal>'` | The database user in step 6 was never created, or was created under a different name than the identity's. |
-| Deploy fails with `MissingSubscriptionRegistration` for `Microsoft.Communication` | The resource provider was never registered on the subscription. See step 6. |
+| `Login failed for user '<token-identified principal>'` | The database user in step 7 was never created, or was created under a different name than the identity's. |
+| Deploy fails with `MissingSubscriptionRegistration` for `Microsoft.Communication` | The resource provider was never registered on the subscription. See *Prerequisites* above — it cannot be done from CI. |
 | Deploy fails with `DomainValidationError` | `senderDomainVerified` is `true` but the domain is not verified yet. See step 6. |
 | `/v1/auth/code` answers 202 and no email arrives | The domain is not linked (`senderDomainVerified` still `false`), or the identity lacks its role on the Communication Services resource (step 5). |
 | Revision stuck on the placeholder image, or an image pull failure | The identity's `AcrPull` grant from step 5 is missing. |
