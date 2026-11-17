@@ -192,7 +192,7 @@ mail that reads as phishing (ADR-0018).
 Read the records Azure wants and put them in the domain's DNS:
 
 ```bash
-az communication email domain show --name rekfar.no \
+az communication email domain show --name danotographer.com \
     --email-service-name rekfar-email --resource-group rekfar-api \
     --query 'verificationRecords'
 ```
@@ -200,6 +200,24 @@ az communication email domain show --name rekfar.no \
 That is a TXT record for ownership, SPF, and two DKIM CNAMEs. Then initiate verification for
 each of them (`az communication email domain initiate-verification`), and check
 `verificationStates` until all are `Verified`.
+
+**The sending domain is not Rekfar's own, and that matters for SPF.** `danotographer.com`
+carries its owner's other mail, so it almost certainly already has an SPF record. **A domain
+may have exactly one.** Adding Azure's as a second TXT record does not add a sender — it makes
+the domain fail SPF outright, for every message it sends, Rekfar's and everything else's. Merge
+the `include:` Azure asks for into the existing record instead:
+
+```
+v=spf1 include:_spf.google.com include:spf.protection.outlook.com -all
+```
+
+DKIM is safe by comparison: Azure's selectors are its own, so the two CNAMEs sit beside any
+existing DKIM without touching it.
+
+If that merge is unwelcome on a working business domain, send from a subdomain instead — set
+`senderDomain` to something like `mail.danotographer.com` and `senderAddress` to a local part
+on it. A subdomain gets its own SPF record and its own reputation, and nothing you do to it can
+affect the apex's mail.
 
 **Then link it.** Azure refuses to link a domain to the Communication Services resource until
 it is verified, and the domain cannot be verified before the template has created it. So the
@@ -210,6 +228,17 @@ deploy it. Until then **no sign-in code is delivered** — `/v1/auth/code` still
 
 Leave it `true` from then on. A deployment with `false` unlinks the domain, and sign-in mail
 stops with nothing failing loudly.
+
+That same deployment provisions the From address. Adding a domain gives Azure exactly one
+MailFrom address, `donotreply`, so `rekfar@danotographer.com` is a resource the template has to
+declare — `senderMailFrom` in `infra/main.bicep`, named from the local part of `senderAddress`
+so the two cannot drift. Without it every send fails on an address that reads as correct in
+configuration. Check it landed:
+
+```bash
+az communication email domain sender-username list --domain-name danotographer.com \
+    --email-service-name rekfar-email --resource-group rekfar-api -o table
+```
 
 **`dataLocation` is fixed at creation**, exactly like the database's collation. Getting it
 wrong means recreating the resource.
