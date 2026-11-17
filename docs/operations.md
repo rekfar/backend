@@ -182,6 +182,16 @@ That is a TXT record for ownership, SPF, and two DKIM CNAMEs. Then initiate veri
 each of them (`az communication email domain initiate-verification`), and check
 `verificationStates` until all are `Verified`.
 
+**Then link it.** Azure refuses to link a domain to the Communication Services resource until
+it is verified, and the domain cannot be verified before the template has created it. So the
+template creates it unlinked: `senderDomainVerified` in `infra/main.bicep` defaults to `false`,
+and deployments succeed with the resource holding no sending domain. Once every
+`verificationStates` entry is `Verified`, change that default to `true` in a commit and let CI
+deploy it. Until then **no sign-in code is delivered** — `/v1/auth/code` still answers 202.
+
+Leave it `true` from then on. A deployment with `false` unlinks the domain, and sign-in mail
+stops with nothing failing loudly.
+
 `Microsoft.Communication` must be registered as a resource provider on the subscription before
 the first deployment: `az provider register --namespace Microsoft.Communication`.
 
@@ -348,6 +358,9 @@ Mitigations, in order of preference: raise the database's auto-pause delay; rais
 | `az acr login` succeeds, `docker push` gets 403 | `AcrPush` is missing. `Contributor` does not imply it. |
 | Revision unhealthy, container exits immediately | Almost always configuration. The app fails fast by design: no `Cors:AllowedOrigins` and no connection string are both startup exceptions naming what is missing. Read the system logs. |
 | `Login failed for user '<token-identified principal>'` | The database user in step 6 was never created, or was created under a different name than the identity's. |
+| Deploy fails with `MissingSubscriptionRegistration` for `Microsoft.Communication` | The resource provider was never registered on the subscription. See step 6. |
+| Deploy fails with `DomainValidationError` | `senderDomainVerified` is `true` but the domain is not verified yet. See step 6. |
+| `/v1/auth/code` answers 202 and no email arrives | The domain is not linked (`senderDomainVerified` still `false`), or the identity lacks its role on the Communication Services resource (step 5). |
 | Revision stuck on the placeholder image, or an image pull failure | The identity's `AcrPull` grant from step 5 is missing. |
 | Every caller shares one rate-limit partition | `Hosting__TrustForwardedHeaders` is not `true`. Behind the ingress the app otherwise sees the proxy's address for everyone. |
 | CORS errors in the browser, `curl` fine | `corsAllowedOrigin` does not match the site's origin exactly — scheme and host, no trailing slash. |

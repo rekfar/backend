@@ -51,6 +51,15 @@ param emailDataLocation string = 'Norway'
 @description('The custom domain sign-in codes are sent from. Customer-managed, so it stays Pending until its SPF, DKIM and verification DNS records exist — see docs/operations.md. Azure managed domains send from a generated azurecomm.net subdomain, which is not acceptable for mail carrying a login code.')
 param senderDomain string = 'rekfar.no'
 
+// Linking an unverified customer-managed domain is refused outright (DomainValidationError),
+// and it cannot be verified before this template has created it, so a fresh environment needs
+// two deployments: one with this false that creates the domain, then DNS and verification by
+// hand, then one with this true. Set it to true in this file, not as a CI parameter, once
+// `verificationStates` are all Verified — and leave it true: deploying false afterwards would
+// unlink the domain and stop sign-in mail.
+@description('Whether senderDomain has passed DNS verification and can be linked to the Communication Services resource. Until it is, the resource exists without a sending domain and no sign-in code is delivered. See docs/operations.md.')
+param senderDomainVerified bool = false
+
 @description('The From address, which must be on senderDomain. No-reply because there is nothing to reply to: the mail carries a code and asks for nothing back.')
 param senderAddress string = 'ikke-svar@rekfar.no'
 
@@ -127,9 +136,7 @@ resource communicationService 'Microsoft.Communication/communicationServices@202
   location: 'global'
   properties: {
     dataLocation: emailDataLocation
-    linkedDomains: [
-      emailDomain.id
-    ]
+    linkedDomains: senderDomainVerified ? [ emailDomain.id ] : []
   }
 }
 
