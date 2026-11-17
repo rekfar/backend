@@ -51,14 +51,17 @@ param emailDataLocation string = 'Norway'
 @description('The custom domain sign-in codes are sent from. Customer-managed, so it stays Pending until its SPF, DKIM and verification DNS records exist — see docs/operations.md. Azure managed domains send from a generated azurecomm.net subdomain, which is not acceptable for mail carrying a login code.')
 param senderDomain string = 'mail.danotographer.com'
 
-// Linking an unverified customer-managed domain is refused outright (DomainValidationError),
-// and it cannot be verified before this template has created it, so a fresh environment needs
-// two deployments: one with this false that creates the domain, then DNS and verification by
-// hand, then one with this true. Set it to true in this file, not as a CI parameter, once
-// `verificationStates` are all Verified — and leave it true: deploying false afterwards would
-// unlink the domain and stop sign-in mail.
-@description('Whether senderDomain has passed DNS verification and can be linked to the Communication Services resource. Until it is, the resource exists without a sending domain and no sign-in code is delivered. See docs/operations.md.')
-param senderDomainVerified bool = false
+// True because mail.danotographer.com is verified: its four DNS records are in place and every
+// `verificationStates` entry reads Verified. Leave it true — deploying false afterwards unlinks
+// the domain and sign-in mail stops with nothing failing loudly.
+//
+// **A fresh environment must pass false on its first deployment.** Linking an unverified
+// customer-managed domain is refused outright (DomainValidationError), and a domain cannot be
+// verified before this template has created it, so bootstrapping is two deployments: one with
+// false that creates the domain, then DNS and verification by hand, then back to this default.
+// docs/operations.md step 4 passes it explicitly for that reason.
+@description('Whether senderDomain has passed DNS verification and can be linked to the Communication Services resource, and its MailFrom address created. False leaves the resource with no sending domain, and no sign-in code is delivered. See docs/operations.md.')
+param senderDomainVerified bool = true
 
 @description('The From address, which must be on senderDomain, and whose local part is provisioned below as a MailFrom address. A subdomain dedicated to this, so Rekfar sends under its own SPF record and its own reputation rather than the apex\'s.')
 param senderAddress string = 'rekfar@mail.danotographer.com'
