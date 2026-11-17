@@ -16,16 +16,16 @@
   </PropertyGroup>
 
   <ItemGroup Label="Application">
-    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.15" />
     <!-- Brings Microsoft.EntityFrameworkCore.SqlServer with it; the geometry types come
          from NetTopologySuite, never from provider-specific spatial SQL (ADR-0010). -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer.NetTopologySuite" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer.NetTopologySuite" Version="10.0.15" />
     <!-- The Auth & Account module is not spatial, so it takes the plain SQL Server provider.
          Same version as the one above, which is the point of deciding versions here. -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.15" />
     <!-- Identity's EF Core stores. Only the user-side entities are used; this schema has no
          table for roles, claims, logins or tokens, and the model ignores them. -->
-    <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.15" />
     <!-- Transactional email for sign-in codes (ADR-0018), authenticated by managed identity. -->
     <PackageVersion Include="Azure.Communication.Email" Version="1.1.0" />
     <PackageVersion Include="Azure.Identity" Version="1.21.0" />
@@ -33,7 +33,7 @@
 
   <ItemGroup Label="Testing">
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.15" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <!-- Publishes the database repository's dacpac in-process, so the integration tests
          need no SqlPackage tool on PATH. Same version its CI pins for SqlPackage. -->
