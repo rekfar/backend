@@ -123,8 +123,14 @@ registry does not exist yet.
 az deployment group create \
     --resource-group rekfar-api \
     --template-file infra/main.bicep \
-    --parameters imageTag=bootstrap
+    --parameters imageTag=bootstrap senderDomainVerified=false
 ```
+
+**Both parameters are needed on this one run, and for the same kind of reason:** each names
+something that cannot exist yet. `senderDomainVerified` defaults to `true` because the deployed
+environment's sending domain *is* verified — but a fresh environment's is not, and cannot be
+until this deployment has created it. Linking it anyway fails with `DomainValidationError`.
+Step 6 is where it becomes true, and from then on the default is correct and nothing passes it.
 
 `imageTag=bootstrap` is a documented escape hatch in the template: it substitutes Microsoft's
 quickstart image, because on this one run the registry it would otherwise pull from has only
@@ -231,14 +237,14 @@ No MX record is needed. The subdomain only sends; a reply to the From address ha
 land, which is worth knowing before putting it in front of users.
 
 **Then link it.** Azure refuses to link a domain to the Communication Services resource until
-it is verified, and the domain cannot be verified before the template has created it. So the
-template creates it unlinked: `senderDomainVerified` in `infra/main.bicep` defaults to `false`,
-and deployments succeed with the resource holding no sending domain. Once every
-`verificationStates` entry is `Verified`, change that default to `true` in a commit and let CI
-deploy it. Until then **no sign-in code is delivered** — `/v1/auth/code` still answers 202.
+it is verified, and the domain cannot be verified before the template has created it — which is
+why bootstrapping passes `senderDomainVerified=false` in step 4 and this step is separate from
+it. Once every `verificationStates` entry is `Verified`, stop passing it: the default in
+`infra/main.bicep` is `true`, so a deployment from `main` links the domain. Until that
+deployment runs, **no sign-in code is delivered** — `/v1/auth/code` still answers 202.
 
-Leave it `true` from then on. A deployment with `false` unlinks the domain, and sign-in mail
-stops with nothing failing loudly.
+Leave the default `true` from then on. A deployment with `false` unlinks the domain, and
+sign-in mail stops with nothing failing loudly.
 
 That same deployment provisions the From address. Adding a domain gives Azure exactly one
 MailFrom address, `donotreply`, so `rekfar@mail.danotographer.com` is a resource the template has to
@@ -415,8 +421,8 @@ Mitigations, in order of preference: raise the database's auto-pause delay; rais
 | Revision unhealthy, container exits immediately | Almost always configuration. The app fails fast by design: no `Cors:AllowedOrigins` and no connection string are both startup exceptions naming what is missing. Read the system logs. |
 | `Login failed for user '<token-identified principal>'` | The database user in step 7 was never created, or was created under a different name than the identity's. |
 | Deploy fails with `MissingSubscriptionRegistration` for `Microsoft.Communication` | The resource provider was never registered on the subscription. See *Prerequisites* above — it cannot be done from CI. |
-| Deploy fails with `DomainValidationError` | `senderDomainVerified` is `true` but the domain is not verified yet. See step 6. |
-| `/v1/auth/code` answers 202 and no email arrives | The domain is not linked (`senderDomainVerified` still `false`), or the identity lacks its role on the Communication Services resource (step 5). |
+| Deploy fails with `DomainValidationError` | The domain is not verified yet, and `senderDomainVerified` is `true` — its default. On a fresh environment's first deployment, pass `senderDomainVerified=false` (step 4). Otherwise the domain lost its verification. |
+| `/v1/auth/code` answers 202 and no email arrives | The From address is not a provisioned MailFrom address on the domain, or the identity lacks its role on the Communication Services resource (step 5), or the domain is unlinked because a deployment passed `senderDomainVerified=false`. The live log says which. |
 | Revision stuck on the placeholder image, or an image pull failure | The identity's `AcrPull` grant from step 5 is missing. |
 | Every caller shares one rate-limit partition | `Hosting__TrustForwardedHeaders` is not `true`. Behind the ingress the app otherwise sees the proxy's address for everyone. |
 | CORS errors in the browser, `curl` fine | `corsAllowedOrigin` does not match the site's origin exactly — scheme and host, no trailing slash. |
